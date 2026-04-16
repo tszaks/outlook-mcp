@@ -26,6 +26,50 @@ export interface OutlookCredentials {
   scopes?: string[];
 }
 
+export interface AttachmentMetadata {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  isInline: boolean;
+}
+
+interface GraphAttachmentRaw {
+  '@odata.type'?: string;
+  id?: string;
+  name?: string;
+  contentType?: string;
+  size?: number;
+  isInline?: boolean;
+  contentBytes?: string;
+  sourceUrl?: string;
+}
+
+function normalizeGraphAttachment(raw: GraphAttachmentRaw): AttachmentMetadata {
+  return {
+    id: String(raw.id ?? ''),
+    filename: String(raw.name ?? '(unnamed)'),
+    contentType: String(raw.contentType ?? 'application/octet-stream'),
+    sizeBytes: Number(raw.size ?? 0),
+    isInline: Boolean(raw.isInline),
+  };
+}
+
+function normalizeMessagesAttachments(response: {
+  value?: Array<Record<string, unknown>>;
+}): void {
+  if (!response || !Array.isArray(response.value)) return;
+
+  for (const message of response.value) {
+    const rawAttachments = message.attachments;
+    if (!Array.isArray(rawAttachments)) continue;
+
+    message.attachments = (rawAttachments as GraphAttachmentRaw[])
+      .map(normalizeGraphAttachment)
+      .filter((a) => !a.isInline);
+  }
+}
+
 interface PendingAuthState {
   state: string;
   codeVerifier: string;
@@ -582,6 +626,7 @@ export class OutlookAccountClient {
       'isRead',
       'bodyPreview',
       'parentFolderId',
+      'hasAttachments',
     ];
 
     if (input.includeBody) {
@@ -591,6 +636,7 @@ export class OutlookAccountClient {
     const params = new URLSearchParams({
       $top: String(top),
       $select: selectFields.join(','),
+      $expand: 'attachments($select=id,name,contentType,size,isInline)',
     });
 
     if (input.query && input.query.trim()) {
@@ -599,9 +645,14 @@ export class OutlookAccountClient {
       params.set('$orderby', 'receivedDateTime DESC');
     }
 
-    return this.graphRequest(`${basePath}?${params.toString()}`, input.query?.trim()
+    const response = await this.graphRequest<{
+      value?: Array<Record<string, unknown>>;
+    }>(`${basePath}?${params.toString()}`, input.query?.trim()
       ? { headers: { ConsistencyLevel: 'eventual' } }
       : undefined);
+
+    normalizeMessagesAttachments(response);
+    return response;
   }
 
   async getEmailThread(input: { messageId?: string; conversationId?: string }): Promise<unknown> {
@@ -623,10 +674,102 @@ export class OutlookAccountClient {
       $orderby: 'receivedDateTime ASC',
       $top: '100',
       $select:
-        'id,conversationId,subject,receivedDateTime,from,toRecipients,ccRecipients,bccRecipients,isRead,bodyPreview,body,parentFolderId',
+        'id,conversationId,subject,receivedDateTime,from,toRecipients,ccRecipients,bccRecipients,isRead,bodyPreview,body,parentFolderId,hasAttachments',
+      $expand: 'attachments($select=id,name,contentType,size,isInline)',
     });
 
-    return this.graphRequest(`/me/messages?${params.toString()}`);
+    const response = await this.graphRequest<{
+      value?: Array<Record<string, unknown>>;
+    }>(`/me/messages?${params.toString()}`);
+
+    normalizeMessagesAttachments(response);
+    return response;
+  }
+
+  async listAttachments(messageId: string): Promise<AttachmentMetadata[]> {
+    if (!messageId || messageId.trim() === '') {
+      throw new Error('message_id is required.');
+    }
+
+    const result = await this.graphRequest<{ value?: GraphAttachmentRaw[] }>(
+      `/me/messages/${encodeURIComponent(messageId.trim())}/attachments?$select=id,name,contentType,size,isInline`,
+    );
+
+    return (result.value ?? [])
+      .map(normalizeGraphAttachment)
+      .filter((a) => !a.isInline);
+  }
+
+  async getAttachment(
+    messageId: string,
+    attachmentId: string,
+  ): Promise<{
+    bytes: Buffer | null;
+    metadata: AttachmentMetadata;
+    attachmentType: 'file' | 'item' | 'reference';
+    referenceUrl?: string;
+    note?: string;
+  }> {
+    if (!messageId || messageId.trim() === '') {
+      throw new Error('message_id is required.');
+    }
+    if (!attachmentId || attachmentId.trim() === '') {
+      throw new Error('attachment_id is required.');
+    }
+
+    const raw = await this.graphRequest<GraphAttachmentRaw>(
+      `/me/messages/${encodeURIComponent(messageId.trim())}/attachments/${encodeURIComponent(attachmentId.trim())}`,
+    );
+
+    const metadata = normalizeGraphAttachment(raw);
+    const odataType = (raw['@odata.type'] ?? '').toLowerCase();
+
+    if (odataType === '#microsoft.graph.fileattachment') {
+      if (!raw.contentBytes) {
+        throw new Error(
+          `File attachment ${attachmentId} returned no contentBytes.`,
+        );
+      }
+      return {
+        bytes: Buffer.from(raw.contentBytes, 'base64'),
+        metadata,
+        attachmentType: 'file',
+      };
+    }
+
+    if (odataType === '#microsoft.graph.itemattachment') {
+      return {
+        bytes: null,
+        metadata,
+        attachmentType: 'item',
+        note: 'Nested item attachment (email/event). Content extraction not supported in v1.',
+      };
+    }
+
+    if (odataType === '#microsoft.graph.referenceattachment') {
+      return {
+        bytes: null,
+        metadata,
+        attachmentType: 'reference',
+        referenceUrl: raw.sourceUrl,
+        note: 'Reference attachment (e.g., OneDrive link). No bytes available; use the URL.',
+      };
+    }
+
+    if (raw.contentBytes) {
+      return {
+        bytes: Buffer.from(raw.contentBytes, 'base64'),
+        metadata,
+        attachmentType: 'file',
+      };
+    }
+
+    return {
+      bytes: null,
+      metadata,
+      attachmentType: 'item',
+      note: `Unknown attachment type "${raw['@odata.type'] ?? ''}"; no bytes available.`,
+    };
   }
 
   async sendEmail(input: {

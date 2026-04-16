@@ -29,8 +29,10 @@ import {
   finishAuthFromCredentials,
   OutlookAccountClient,
   readCredentialsFile,
+  type AttachmentMetadata,
   type OutlookCredentials,
 } from './graph-client.js';
+import { saveAndExtract, type AttachmentContent } from './attachments.js';
 
 interface BeginAuthArgs {
   account_id: string;
@@ -43,6 +45,17 @@ interface BeginAuthArgs {
 interface FinishAuthArgs {
   account_id: string;
   authorization_code: string;
+}
+
+interface GetAttachmentArgs {
+  account: string;
+  email_id: string;
+  attachment_id: string;
+}
+
+interface GetAllAttachmentsArgs {
+  account: string;
+  email_id: string;
 }
 
 function textResult(text: string): CallToolResult {
@@ -521,6 +534,38 @@ class OutlookMcpServer {
             additionalProperties: false,
           },
         },
+        {
+          name: 'get_attachment',
+          description:
+            'Fetch a single Outlook email attachment by id. Saves to ~/Downloads/mcp-attachments/ and returns extracted text for supported formats (PDF, DOCX, XLSX, PPTX, text, images via OCR). Handles file, item, and reference attachment types.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string', description: 'Account id.' },
+              email_id: { type: 'string', description: 'Graph message id.' },
+              attachment_id: {
+                type: 'string',
+                description: 'Attachment id from read_emails / get_email_thread metadata.',
+              },
+            },
+            required: ['account', 'email_id', 'attachment_id'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'get_all_attachments',
+          description:
+            'Fetch every attachment on an Outlook email in one call. Saves each to disk and returns extracted text for each.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string', description: 'Account id.' },
+              email_id: { type: 'string', description: 'Graph message id.' },
+            },
+            required: ['account', 'email_id'],
+            additionalProperties: false,
+          },
+        },
       ],
     }));
 
@@ -903,6 +948,121 @@ class OutlookMcpServer {
             const client = await OutlookAccountClient.create(this.configRoot, account);
             return textResult(
               formatJson(await client.deleteContact(requireString(args.contact_id, 'contact_id'))),
+            );
+          }
+
+          case 'get_attachment': {
+            const parsed: GetAttachmentArgs = {
+              account: requireString(args.account, 'account'),
+              email_id: requireString(args.email_id, 'email_id'),
+              attachment_id: requireString(args.attachment_id, 'attachment_id'),
+            };
+
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, parsed.account);
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+
+            const fetched = await client.getAttachment(parsed.email_id, parsed.attachment_id);
+
+            if (fetched.bytes === null) {
+              return textResult(
+                formatJson({
+                  account: account.id,
+                  email: account.email,
+                  email_id: parsed.email_id,
+                  attachment_id: parsed.attachment_id,
+                  attachment_type: fetched.attachmentType,
+                  reference_url: fetched.referenceUrl,
+                  filename: fetched.metadata.filename,
+                  content_type: fetched.metadata.contentType,
+                  size_bytes: fetched.metadata.sizeBytes,
+                  saved_path: null,
+                  text: null,
+                  extraction_method: 'none',
+                  extraction_error: fetched.note,
+                }),
+              );
+            }
+
+            const content: AttachmentContent = await saveAndExtract(
+              fetched.bytes,
+              fetched.metadata,
+            );
+            content.attachmentType = fetched.attachmentType;
+            content.referenceUrl = fetched.referenceUrl;
+
+            return textResult(
+              formatJson({
+                account: account.id,
+                email: account.email,
+                email_id: parsed.email_id,
+                attachment_id: parsed.attachment_id,
+                attachment: content,
+              }),
+            );
+          }
+
+          case 'get_all_attachments': {
+            const parsed: GetAllAttachmentsArgs = {
+              account: requireString(args.account, 'account'),
+              email_id: requireString(args.email_id, 'email_id'),
+            };
+
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, parsed.account);
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+
+            const list: AttachmentMetadata[] = await client.listAttachments(parsed.email_id);
+
+            const settled = await Promise.allSettled(
+              list.map(async (meta) => {
+                const fetched = await client.getAttachment(parsed.email_id, meta.id);
+                if (fetched.bytes === null) {
+                  const placeholder: AttachmentContent = {
+                    ...fetched.metadata,
+                    savedPath: '',
+                    text: null,
+                    extractionMethod: 'none',
+                    extractionError: fetched.note,
+                    attachmentType: fetched.attachmentType,
+                    referenceUrl: fetched.referenceUrl,
+                  };
+                  return placeholder;
+                }
+                const content = await saveAndExtract(fetched.bytes, fetched.metadata);
+                content.attachmentType = fetched.attachmentType;
+                content.referenceUrl = fetched.referenceUrl;
+                return content;
+              }),
+            );
+
+            const attachments: AttachmentContent[] = [];
+            const errors: Array<{ attachment_id: string; error: string }> = [];
+
+            settled.forEach((result, index) => {
+              const originalId = list[index]?.id ?? '(unknown)';
+              if (result.status === 'fulfilled') {
+                attachments.push(result.value);
+              } else {
+                errors.push({
+                  attachment_id: originalId,
+                  error:
+                    result.reason instanceof Error
+                      ? result.reason.message
+                      : String(result.reason),
+                });
+              }
+            });
+
+            return textResult(
+              formatJson({
+                account: account.id,
+                email: account.email,
+                email_id: parsed.email_id,
+                count: attachments.length,
+                attachments,
+                errors,
+              }),
             );
           }
 

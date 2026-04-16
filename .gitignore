@@ -10,3 +10,4 @@ token-cache.json
 accounts.json
 pending-auth.json
 meta.json
+vendor/ocr/ocr-bin
