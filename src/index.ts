@@ -566,6 +566,251 @@ class OutlookMcpServer {
             additionalProperties: false,
           },
         },
+        {
+          name: 'search_emails',
+          description: 'Full-text search across Outlook emails. Returns matching messages sorted by relevance.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              query: { type: 'string' },
+              folder: { type: 'string' },
+              max_results: { type: 'number', default: 20 },
+              include_body: { type: 'boolean', default: false },
+            },
+            required: ['account', 'query'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'list_drafts',
+          description: 'List Outlook draft messages, sorted by last modified date.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              max_results: { type: 'number', default: 20 },
+              skip: { type: 'number' },
+            },
+            required: ['account'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'search_drafts',
+          description: 'Search within Outlook drafts by keyword.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              query: { type: 'string' },
+              max_results: { type: 'number', default: 20 },
+            },
+            required: ['account', 'query'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'send_draft',
+          description: 'Send an existing Outlook draft by message_id.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              message_id: { type: 'string' },
+            },
+            required: ['account', 'message_id'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'delete_drafts',
+          description: 'Delete one or more Outlook drafts by message_id. Requires confirm=true and reason.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              message_ids: { type: 'array', items: { type: 'string' } },
+              confirm: { type: 'boolean' },
+              reason: { type: 'string' },
+            },
+            required: ['account', 'message_ids', 'confirm', 'reason'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'archive_emails',
+          description: 'Move one or more Outlook emails to the Archive folder.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              message_ids: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['account', 'message_ids'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'trash_emails',
+          description: 'Move one or more Outlook emails to the Deleted Items folder (soft delete).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              message_ids: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['account', 'message_ids'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'mute_thread',
+          description: 'Mute an Outlook conversation thread by moving all messages to Deleted Items. Provide message_id or conversation_id.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              message_id: { type: 'string' },
+              conversation_id: { type: 'string' },
+            },
+            required: ['account'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'unsubscribe_from_email',
+          description: 'Unsubscribe from a mailing list using the List-Unsubscribe header in the email. Handles both HTTP and mailto unsubscribe methods.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              message_id: { type: 'string' },
+            },
+            required: ['account', 'message_id'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'block_sender',
+          description: "Add a sender to Outlook's blocked/junk list so their future emails are filtered to Other.",
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              sender_email: { type: 'string' },
+            },
+            required: ['account', 'sender_email'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'unblock_sender',
+          description: 'Remove a sender from the Outlook blocked list by override_id (from list_blocked_senders).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              override_id: { type: 'string' },
+            },
+            required: ['account', 'override_id'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'list_blocked_senders',
+          description: "List all senders blocked via Outlook's Focused Inbox override list.",
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+            },
+            required: ['account'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'get_event',
+          description: 'Get a single Outlook calendar event by event_id, including full body and attendee details.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              event_id: { type: 'string' },
+            },
+            required: ['account', 'event_id'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'list_categories',
+          description: 'List all Outlook categories (labels) for an account.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+            },
+            required: ['account'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'create_category',
+          description: 'Create a new Outlook category (label). Color options: none, red, orange, yellow, green, teal, olive, blue, purple, cranberry, steel, darkSteel, darkBlue, darkPurple, darkTeal, darkGreen, darkYellow, darkOrange, darkRed, darkCranberry.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              display_name: { type: 'string' },
+              color: { type: 'string' },
+            },
+            required: ['account', 'display_name'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'delete_category',
+          description: 'Delete an Outlook category by category_id (from list_categories). Requires confirm=true and reason.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              category_id: { type: 'string' },
+              confirm: { type: 'boolean' },
+              reason: { type: 'string' },
+            },
+            required: ['account', 'category_id', 'confirm', 'reason'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'add_categories',
+          description: 'Add one or more Outlook categories to a message (merges with existing categories).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              message_id: { type: 'string' },
+              categories: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['account', 'message_id', 'categories'],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: 'remove_categories',
+          description: 'Remove categories from an Outlook message. Omit categories to remove all.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              account: { type: 'string' },
+              message_id: { type: 'string' },
+              categories: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['account', 'message_id'],
+            additionalProperties: false,
+          },
+        },
       ],
     }));
 
@@ -1063,6 +1308,210 @@ class OutlookMcpServer {
                 attachments,
                 errors,
               }),
+            );
+          }
+
+          case 'search_emails': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(
+                await client.searchEmails({
+                  query: requireString(args.query, 'query'),
+                  folder: optionalString(args.folder),
+                  maxResults: optionalNumber(args.max_results, 'max_results', 20),
+                  includeBody: optionalBoolean(args.include_body, 'include_body') ?? false,
+                }),
+              ),
+            );
+          }
+
+          case 'list_drafts': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(
+                await client.listDrafts({
+                  maxResults: optionalNumber(args.max_results, 'max_results', 20),
+                  skip: args.skip !== undefined ? optionalNumber(args.skip, 'skip', 0) : undefined,
+                }),
+              ),
+            );
+          }
+
+          case 'search_drafts': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(
+                await client.searchEmails({
+                  query: requireString(args.query, 'query'),
+                  folder: 'drafts',
+                  maxResults: optionalNumber(args.max_results, 'max_results', 20),
+                  includeBody: false,
+                }),
+              ),
+            );
+          }
+
+          case 'send_draft': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(await client.sendDraft(requireString(args.message_id, 'message_id'))),
+            );
+          }
+
+          case 'delete_drafts': {
+            requireConfirm(args.confirm, args.reason);
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(await client.deleteDrafts(requireStringArray(args.message_ids, 'message_ids'))),
+            );
+          }
+
+          case 'archive_emails': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(await client.archiveEmails(requireStringArray(args.message_ids, 'message_ids'))),
+            );
+          }
+
+          case 'trash_emails': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(await client.trashEmails(requireStringArray(args.message_ids, 'message_ids'))),
+            );
+          }
+
+          case 'mute_thread': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(
+                await client.muteThread({
+                  messageId: optionalString(args.message_id),
+                  conversationId: optionalString(args.conversation_id),
+                }),
+              ),
+            );
+          }
+
+          case 'unsubscribe_from_email': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(
+                await client.unsubscribeFromEmail(requireString(args.message_id, 'message_id')),
+              ),
+            );
+          }
+
+          case 'block_sender': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(await client.blockSender(requireString(args.sender_email, 'sender_email'))),
+            );
+          }
+
+          case 'unblock_sender': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(await client.unblockSender(requireString(args.override_id, 'override_id'))),
+            );
+          }
+
+          case 'list_blocked_senders': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(formatJson(await client.listBlockedSenders()));
+          }
+
+          case 'get_event': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(await client.getEvent(requireString(args.event_id, 'event_id'))),
+            );
+          }
+
+          case 'list_categories': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(formatJson(await client.listCategories()));
+          }
+
+          case 'create_category': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(
+                await client.createCategory(
+                  requireString(args.display_name, 'display_name'),
+                  optionalString(args.color),
+                ),
+              ),
+            );
+          }
+
+          case 'delete_category': {
+            requireConfirm(args.confirm, args.reason);
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(await client.deleteCategory(requireString(args.category_id, 'category_id'))),
+            );
+          }
+
+          case 'add_categories': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            return textResult(
+              formatJson(
+                await client.addCategories(
+                  requireString(args.message_id, 'message_id'),
+                  requireStringArray(args.categories, 'categories'),
+                ),
+              ),
+            );
+          }
+
+          case 'remove_categories': {
+            const config = await loadAccountsConfig(this.configRoot);
+            const account = resolveWriteAccount(config, requireString(args.account, 'account'));
+            const client = await OutlookAccountClient.create(this.configRoot, account);
+            const categories = Array.isArray(args.categories)
+              ? (args.categories as string[]).map(String).filter(Boolean)
+              : undefined;
+            return textResult(
+              formatJson(
+                await client.removeCategories(
+                  requireString(args.message_id, 'message_id'),
+                  categories,
+                ),
+              ),
             );
           }
 

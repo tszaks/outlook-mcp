@@ -17,6 +17,7 @@ export const OUTLOOK_SCOPES = [
   'Mail.Send',
   'Calendars.ReadWrite',
   'Contacts.ReadWrite',
+  'MailboxSettings.ReadWrite',
 ] as const;
 
 export interface OutlookCredentials {
@@ -1004,5 +1005,262 @@ export class OutlookAccountClient {
       method: 'DELETE',
     });
     return { success: true };
+  }
+
+  async searchEmails(input: {
+    query: string;
+    folder?: string;
+    maxResults: number;
+    includeBody: boolean;
+  }): Promise<unknown> {
+    const top = Math.max(1, Math.min(input.maxResults, 100));
+    const basePath = input.folder
+      ? `/me/mailFolders/${encodeURIComponent(input.folder)}/messages`
+      : '/me/messages';
+    const selectFields = [
+      'id', 'conversationId', 'internetMessageId', 'subject',
+      'receivedDateTime', 'sentDateTime', 'from', 'toRecipients',
+      'ccRecipients', 'bccRecipients', 'isRead', 'bodyPreview',
+      'parentFolderId', 'hasAttachments',
+    ];
+    if (input.includeBody) selectFields.push('body');
+
+    const params = new URLSearchParams({
+      $top: String(top),
+      $select: selectFields.join(','),
+      $search: `"${input.query.trim().replace(/"/g, '\\"')}"`,
+      $expand: 'attachments($select=id,name,contentType,size,isInline)',
+    });
+
+    const response = await this.graphRequest<{ value?: Array<Record<string, unknown>> }>(
+      `${basePath}?${params.toString()}`,
+      { headers: { ConsistencyLevel: 'eventual' } },
+    );
+    normalizeMessagesAttachments(response);
+    return response;
+  }
+
+  async listDrafts(input: { maxResults: number; skip?: number }): Promise<unknown> {
+    const top = Math.max(1, Math.min(input.maxResults, 100));
+    const params = new URLSearchParams({
+      $top: String(top),
+      $orderby: 'lastModifiedDateTime DESC',
+      $select:
+        'id,subject,createdDateTime,lastModifiedDateTime,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,hasAttachments',
+    });
+    if (input.skip && input.skip > 0) {
+      params.set('$skip', String(input.skip));
+    }
+    return this.graphRequest(`/me/mailFolders/drafts/messages?${params.toString()}`);
+  }
+
+  async sendDraft(messageId: string): Promise<{ success: boolean }> {
+    await this.graphRequest(`/me/messages/${encodeURIComponent(messageId)}/send`, {
+      method: 'POST',
+    });
+    return { success: true };
+  }
+
+  async deleteDrafts(
+    messageIds: string[],
+  ): Promise<{ deleted: string[]; errors: Array<{ id: string; error: string }> }> {
+    const results = await Promise.allSettled(
+      messageIds.map((id) =>
+        this.graphRequest(`/me/messages/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+      ),
+    );
+    const deleted: string[] = [];
+    const errors: Array<{ id: string; error: string }> = [];
+    results.forEach((result, i) => {
+      if (result.status === 'fulfilled') {
+        deleted.push(messageIds[i]);
+      } else {
+        errors.push({
+          id: messageIds[i],
+          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        });
+      }
+    });
+    return { deleted, errors };
+  }
+
+  async archiveEmails(messageIds: string[]): Promise<unknown[]> {
+    return Promise.all(
+      messageIds.map((id) =>
+        this.graphRequest(`/me/messages/${encodeURIComponent(id)}/move`, {
+          method: 'POST',
+          body: { destinationId: 'archive' },
+        }),
+      ),
+    );
+  }
+
+  async trashEmails(messageIds: string[]): Promise<unknown[]> {
+    return Promise.all(
+      messageIds.map((id) =>
+        this.graphRequest(`/me/messages/${encodeURIComponent(id)}/move`, {
+          method: 'POST',
+          body: { destinationId: 'deleteditems' },
+        }),
+      ),
+    );
+  }
+
+  async muteThread(input: {
+    messageId?: string;
+    conversationId?: string;
+  }): Promise<{ success: boolean; movedCount: number }> {
+    let conversationId = input.conversationId?.trim();
+
+    if (!conversationId && input.messageId?.trim()) {
+      const message = await this.graphRequest<{ conversationId?: string }>(
+        `/me/messages/${encodeURIComponent(input.messageId.trim())}?$select=conversationId`,
+      );
+      conversationId = message.conversationId?.trim();
+    }
+
+    if (!conversationId) {
+      throw new Error('Provide either message_id or conversation_id.');
+    }
+
+    const params = new URLSearchParams({
+      $filter: `conversationId eq '${escapeFilterValue(conversationId)}'`,
+      $top: '100',
+      $select: 'id',
+    });
+    const result = await this.graphRequest<{ value?: Array<{ id: string }> }>(
+      `/me/messages?${params.toString()}`,
+    );
+    const messages = result.value ?? [];
+
+    await Promise.all(
+      messages.map((m) =>
+        this.graphRequest(`/me/messages/${encodeURIComponent(m.id)}/move`, {
+          method: 'POST',
+          body: { destinationId: 'deleteditems' },
+        }),
+      ),
+    );
+
+    return { success: true, movedCount: messages.length };
+  }
+
+  async unsubscribeFromEmail(
+    messageId: string,
+  ): Promise<{ success: boolean; method: string; address: string }> {
+    const message = await this.graphRequest<{
+      internetMessageHeaders?: Array<{ name: string; value: string }>;
+    }>(`/me/messages/${encodeURIComponent(messageId)}?$select=internetMessageHeaders`);
+
+    const headers = message.internetMessageHeaders ?? [];
+    const unsubHeader = headers.find((h) => h.name.toLowerCase() === 'list-unsubscribe');
+
+    if (!unsubHeader) {
+      throw new Error('This email does not have a List-Unsubscribe header.');
+    }
+
+    const matches = unsubHeader.value.match(/<([^>]+)>/g) ?? [];
+    const urls = matches.map((m) => m.slice(1, -1));
+
+    const httpUrl = urls.find((u) => u.startsWith('http://') || u.startsWith('https://'));
+    const mailtoUrl = urls.find((u) => u.startsWith('mailto:'));
+
+    if (httpUrl) {
+      const response = await fetch(httpUrl);
+      return { success: response.ok, method: 'http', address: httpUrl };
+    }
+
+    if (mailtoUrl) {
+      const parsed = new URL(mailtoUrl);
+      const to = parsed.pathname;
+      const subject = parsed.searchParams.get('subject') ?? 'Unsubscribe';
+      const body = parsed.searchParams.get('body') ?? '';
+      await this.sendEmail({ to, subject, body, html: false });
+      return { success: true, method: 'email', address: to };
+    }
+
+    throw new Error(`Could not parse unsubscribe mechanism from: ${unsubHeader.value}`);
+  }
+
+  async blockSender(senderEmail: string): Promise<unknown> {
+    return this.graphRequest('/me/inferenceClassification/overrides', {
+      method: 'POST',
+      body: {
+        classifyAs: 'other',
+        senderEmailAddress: { address: senderEmail },
+      },
+    });
+  }
+
+  async unblockSender(overrideId: string): Promise<{ success: boolean }> {
+    await this.graphRequest(
+      `/me/inferenceClassification/overrides/${encodeURIComponent(overrideId)}`,
+      { method: 'DELETE' },
+    );
+    return { success: true };
+  }
+
+  async listBlockedSenders(): Promise<unknown> {
+    return this.graphRequest('/me/inferenceClassification/overrides');
+  }
+
+  async getEvent(eventId: string): Promise<unknown> {
+    return this.graphRequest(
+      `/me/events/${encodeURIComponent(eventId)}?$select=id,subject,start,end,isAllDay,location,organizer,attendees,body,webLink,lastModifiedDateTime,recurrence,reminderMinutesBeforeStart`,
+    );
+  }
+
+  async listCategories(): Promise<unknown> {
+    return this.graphRequest('/me/outlook/masterCategories');
+  }
+
+  async createCategory(displayName: string, color?: string): Promise<unknown> {
+    const body: Record<string, unknown> = { displayName };
+    if (color) body.color = color;
+    return this.graphRequest('/me/outlook/masterCategories', {
+      method: 'POST',
+      body,
+    });
+  }
+
+  async deleteCategory(categoryId: string): Promise<{ success: boolean }> {
+    await this.graphRequest(
+      `/me/outlook/masterCategories/${encodeURIComponent(categoryId)}`,
+      { method: 'DELETE' },
+    );
+    return { success: true };
+  }
+
+  async addCategories(messageId: string, categories: string[]): Promise<unknown> {
+    const current = await this.graphRequest<{ categories?: string[] }>(
+      `/me/messages/${encodeURIComponent(messageId)}?$select=categories`,
+    );
+    const existing = current.categories ?? [];
+    const merged = Array.from(new Set([...existing, ...categories]));
+    return this.graphRequest(`/me/messages/${encodeURIComponent(messageId)}`, {
+      method: 'PATCH',
+      body: { categories: merged },
+    });
+  }
+
+  async removeCategories(messageId: string, categories?: string[]): Promise<unknown> {
+    if (!categories || categories.length === 0) {
+      return this.graphRequest(`/me/messages/${encodeURIComponent(messageId)}`, {
+        method: 'PATCH',
+        body: { categories: [] },
+      });
+    }
+
+    const current = await this.graphRequest<{ categories?: string[] }>(
+      `/me/messages/${encodeURIComponent(messageId)}?$select=categories`,
+    );
+    const existing = current.categories ?? [];
+    const toRemove = new Set(categories.map((c) => c.toLowerCase()));
+    const remaining = existing.filter((c) => !toRemove.has(c.toLowerCase()));
+
+    return this.graphRequest(`/me/messages/${encodeURIComponent(messageId)}`, {
+      method: 'PATCH',
+      body: { categories: remaining },
+    });
   }
 }
