@@ -1,0 +1,53 @@
+name: Bug report
+description: Something in outlook-mcp does not work as it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Do not paste tokens, the contents of `credentials.json` or `token-cache.json`, or private email text. Remove them from any logs first.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Which tool did you call, with which arguments (remove private values)?
+      placeholder: |
+        1. Call `read_emails` with ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: outlook-mcp version
+      description: The `version` in package.json, or the git tag or commit.
+      placeholder: "1.2.0"
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version and OS
+      placeholder: "Node 20.17, macOS 26"
+    validations:
+      required: true
+  - type: dropdown
+    id: account-type
+    attributes:
+      label: Account type
+      options:
+        - "Personal Microsoft account"
+        - "Work or school (Microsoft 365)"
+        - "Not sure"
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Error text from your MCP client, with private values removed.

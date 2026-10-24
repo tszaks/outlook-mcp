@@ -2,7 +2,7 @@
 
 ## Goal
 
-Create a simple, reusable Outlook MCP server for Greg that covers mail, calendar, contacts, and account onboarding without building a one-off custom flow.
+Create a simple, reusable Outlook MCP server that covers mail, calendar, contacts, and account onboarding without building a one-off custom flow.
 
 ## Approach
 
